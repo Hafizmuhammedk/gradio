@@ -167,6 +167,9 @@ class DateTime(FormComponent):
                     delta = timedelta(minutes=num)
                 else:
                     delta = timedelta(seconds=num)
+                if self.timezone:
+                    tz = pytz.timezone(self.timezone)
+                    return tz.normalize(datetime.now(tz) - delta)
                 return datetime.now() - delta
             else:
                 raise ValueError("Invalid 'now' time format")

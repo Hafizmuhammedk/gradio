@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import cast
 
 import pytest
+import pytz
 
 import gradio as gr
 
@@ -63,6 +64,47 @@ class TestDateTimePreprocess:
         result = dt.preprocess("now - 10m")
         assert isinstance(result, str)
         assert len(result) == 19  # "YYYY-MM-DD HH:MM:SS"
+
+    @pytest.mark.parametrize("timezone_name", [None, "US/Pacific", "Pacific/Pago_Pago"])
+    @pytest.mark.parametrize("output_type", ["datetime", "string", "timestamp"])
+    @pytest.mark.parametrize("include_time", [True, False])
+    @pytest.mark.parametrize(
+        ("expression", "seconds"),
+        [("now", 0), ("now - 2h", 7200), ("now - 12d", 12 * 86400)],
+    )
+    def test_preprocess_now_respects_timezone(
+        self, monkeypatch, timezone_name, output_type, include_time, expression, seconds
+    ):
+        # The two-hour offset crosses the US daylight-saving fallback.
+        fixed_now = datetime(2025, 11, 2, 10, 30, tzinfo=timezone.utc)
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return fixed_now.astimezone().replace(tzinfo=None)
+                return fixed_now.astimezone(tz)
+
+        monkeypatch.setattr("gradio.components.datetime.datetime", FrozenDateTime)
+        component = gr.DateTime(
+            type=output_type, timezone=timezone_name, include_time=include_time
+        )
+        if timezone_name:
+            expected = (fixed_now - timedelta(seconds=seconds)).astimezone(
+                pytz.timezone(timezone_name)
+            )
+        else:
+            expected = fixed_now.astimezone().replace(tzinfo=None) - timedelta(
+                seconds=seconds
+            )
+
+        result = component.preprocess(expression)
+        if output_type == "datetime":
+            assert result.isoformat() == expected.isoformat()
+        elif output_type == "string":
+            assert result == expected.strftime(component.time_format)
+        else:
+            assert result == expected.timestamp()
 
     def test_preprocess_now_keyword(self):
         """'now' returns the current timestamp, within tolerance."""
